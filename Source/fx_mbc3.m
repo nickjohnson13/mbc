@@ -78,19 +78,33 @@ elseif(n_RotTripletStates*nb > matData.ndof)
     error('**ERROR: the rotating dof exceeds the total num of dof');
 end
 
-new_seq_dof    = get_new_seq(matData.RotTripletIndicesStates,matData.ndof); % these are the first ndof states (not "first time derivative" states)
-new_seq_states = [new_seq_dof  new_seq_dof+matData.ndof]; % add the remaining ones (assumes ordering of displacements and velocities in state matrices)
+     new_seq_dof_ED    = get_new_seq(matData.RotTripletIndicesStates,matData.NumEDStates_1); % these are the first ndof states (not "first time derivative" states); these values are used to calculate matrix transformations
+     new_seq_states_ED = [new_seq_dof_ED  new_seq_dof_ED+matData.NumEDStates_1]; % add the remaining ones (assumes ordering of displacements and velocities in state matrices); these values are used to calculate matrix transformations 
 
+     if matData.NumHDStates > 1
+         matData.NumStates = matData.ndof + matData.NumEDStates_1;
+%          new_seq_dof_Exctn    = get_new_seq(0,matData.NumExctnStates/2);
+%          % these are the first ndof states (not "first time derivative"
+%          states); <------------------------ NOT CURRENTLY USED TO
+%          CALCULATE MATRICIES
+%          new_seq_states_Exctn = [new_seq_dof_Exctn  new_seq_dof_Exctn+matData.NumEDStates_1]; % add the remaining ones (assumes ordering of displacements and velocities in state matrices)
+%          new_seq_dof_Rdtn    = get_new_seq(0,matData.NumEDStates_1); % these are the first ndof states (not "first time derivative" states)
+%          new_seq_states_Rdtn = [new_seq_dof_Rdtn  new_seq_dof_Rdtn+matData.NumEDStates_1]; % add the remaining ones (assumes ordering of displacements and velocities in state matrices)
+     else
+         matData.NumStates = matData.NumEDStates;
+     end
+     
+% end
 
 if isfield(matData,'RotTripletIndicesCntrlInpt')
     [n_RotTripletInputs,nb] = size(matData.RotTripletIndicesCntrlInpt);
     if(nb ~= 3)
         error('**ERROR: the number of column vectors in RotTripletIndicesCntrlInpt must equal 3, the num of blades');
     end
-    new_seq_inp = get_new_seq(matData.RotTripletIndicesCntrlInpt,matData.NumInputs);
+    new_seq_inp_ED = get_new_seq(matData.RotTripletIndicesCntrlInpt,matData.NumEDInputs);
 else
     n_RotTripletInputs = 0; % number of rotating-frame control triplets
-    new_seq_inp = 1:matData.NumInputs;
+    new_seq_inp_ED = 1:matData.NumEDInputs;
 end
 
 if isfield(matData,'RotTripletIndicesOutput')
@@ -104,12 +118,27 @@ else
     new_seq_out = 1:matData.NumOutputs;
 end
 
-n_FixFrameStates  = matData.ndof       - n_RotTripletStates*nb;  % fixed-frame dof
-n_FixFrameInputs  = matData.NumInputs  - n_RotTripletInputs*nb;  % fixed-frame control inputs
+
+if isfield(matData,'RotTripletIndicesHydroStates') %added by NJ no rotating HD states
+    [n_RotTripletHydroStates,nb] = size(matData.RotTripletIndicesHydroStates);
+    if(nb ~= 3)
+        error('**ERROR: the number of column vectors in RotTripletIndicesHydroStates must equal 3, the num of blades');
+    end
+    new_seq_HD_dof = get_new_seq(matData.RotTripletIndicesHydroStates,matData.NumHydroStates);
+else
+    n_RotTripletHydroStates = 0; % number of rotating-frame output triplets
+    new_seq_ = 1:matData.NumHDStates;
+end
+
+
+
+n_FixFrameStates_ED  = matData.NumEDStates_1       - n_RotTripletStates*nb;  % fixed-frame dof updated by NJ
+n_FixFrameInputs_ED  = matData.NumInputs  - n_RotTripletInputs*nb  -  matData.NumHDInputs;  % fixed-frame control inputs
+
 n_FixFrameOutputs = matData.NumOutputs - n_RotTripletOutputs*nb; % fixed-frame outputs
 
-if isfield(matData,'A')
-    MBC.AvgA = zeros(matData.NumStates);
+if isfield(matData,'A_ED')
+    MBC.AvgA = zeros(matData.NumStates); % initalize matrix
 end
 
 if ( size(matData.Omega) ~= matData.NAzimStep)
@@ -121,6 +150,10 @@ end
 
 % begin azimuth loop 
 for iaz = matData.NAzimStep:-1:1  
+    T1q = 0;
+    T2q = 0;
+    T1qv = 0;
+
     %(loop backwards so we don't reallocate memory each time [i.e. variables with iaz index aren't getting larger each time])
 
     % compute azimuth positions of blades:
@@ -137,30 +170,30 @@ for iaz = matData.NAzimStep:-1:1
     ttv = get_tt_inverse(sin_col, cos_col);     % inverse of tt (computed analytically in function below)
     
     %---
-    T1 = eye(n_FixFrameStates);                 % Eq. 11
+    T1 = eye(n_FixFrameStates_ED);                 % Eq. 11
     for ii = 1:n_RotTripletStates
         T1 = blkdiag(T1, tt);
     end
 
-    T1v = eye(n_FixFrameStates);                % inverse of T1
+    T1v = eye(n_FixFrameStates_ED);                % inverse of T1
     for ii = 1:n_RotTripletStates
         T1v = blkdiag(T1v, ttv);
     end
 
-    T2 = zeros(n_FixFrameStates);               % Eq. 14
+    T2 = zeros(n_FixFrameStates_ED);               % Eq. 14
     tt2 = [zeros(3,1), -sin_col,  cos_col];     % Eq. 16 a
     for ii = 1:n_RotTripletStates
         T2 = blkdiag(T2, tt2);
     end
 
-    T3 = zeros(n_FixFrameStates);               % Eq. 15
+    T3 = zeros(n_FixFrameStates_ED);               % Eq. 15
     tt3 = [zeros(3,1), -cos_col, -sin_col];     % Eq. 16 b
     for ii = 1:n_RotTripletStates
         T3 = blkdiag(T3, tt3);
     end
     
     %---
-    T1c = eye(n_FixFrameInputs);                % Eq. 21
+    T1c = eye(n_FixFrameInputs_ED);                % Eq. 21
     for ii = 1:n_RotTripletInputs;
         T1c = blkdiag(T1c, tt);
     end
@@ -170,77 +203,82 @@ for iaz = matData.NAzimStep:-1:1
         T1ov = blkdiag(T1ov, ttv);
     end
 
+    if matData.NumHDStates>0
+        T1q = eye(matData.NumHDStates);                %Added by NJ 9/13/18;
+        T2q = zeros(matData.NumHDStates);                %Added by NJ 9/13/18;
+        T1qv = eye(matData.NumHDStates);                % inverse of T1q
+        T1qc = eye(matData.NumHDInputs);                % inverse of T1q
+    end
+    
+MBC.A = zeros(matData.NumStates); % initalize matrix
 % mbc transformation of first-order matrices
 %  if ( MBC.EqnsOrder == 1 ) % activate later
 
-    if isfield(matData,'A')
+    if isfield(matData,'A_ED')
             % Eq. 29, assuming
             % xAMat( 1:matData.ndof, 1:matData.NumStates ) = 0 and
             % xAMat( 1:matData.ndof, (matData.ndof+1):matData.NumStates) = I
-        xAMat(:,:) = matData.A(new_seq_states,new_seq_states,iaz); %--
-        AK = xAMat(matData.ndof+1:matData.NumStates,             1:matData.ndof);
-        AC = xAMat(matData.ndof+1:matData.NumStates,matData.ndof+1:matData.NumStates);
-       
-        MBC.A(new_seq_states,new_seq_states,iaz) = ...
-               [zeros(matData.ndof),   eye(matData.ndof);
+        xAMat_ED(:,:) = matData.A_ED(new_seq_states_ED,new_seq_states_ED,iaz); %--
+        AK = xAMat_ED( (matData.NumEDStates_1 + 1) : matData.NumEDStates,             1 : matData.NumEDStates_1);
+        AC = xAMat_ED( (matData.NumEDStates_1 + 1) : matData.NumEDStates, matData.NumEDStates_1 + 1 : matData.NumEDStates);
+               
+        MBC.A(new_seq_states_ED,new_seq_states_ED,iaz) = ...
+               [zeros(matData.NumEDStates_1),   eye(matData.NumEDStates_1);
                 T1v*(AK*T1 +   matData.Omega(iaz)*AC*T2 - OmegaSquared*T3 - matData.OmegaDot(iaz)*T2), ...
                 T1v*(AC*T1 - 2*matData.Omega(iaz)*T2)];
+            
+        if matData.NumHDStates > 0 %matData.NumExctnStates && matData.NumExctnStates > 0
+            xMat_HD(:,:) =  matData.A_HD(:,:,iaz);
+            AQ = xMat_HD; 
+            AS = matData.A_AS(:,:,iaz);
+            MBC.A(matData.NumEDStates + 1:matData.NumStates,matData.NumEDStates + 1:matData.NumStates, iaz) = ...
+			[T1qv*(AQ*T1q - matData.Omega(iaz)*T2q)]; % Trivial for HD only, no rotation
+            MBC.A(matData.NumEDStates_1 + 1:matData.NumEDStates, matData.NumEDStates+1:matData.NumStates, iaz) = ...
+            [T1v*(AS*T1q)]; % Trival for HD only, no rotation
+        end
     end
+          
 
-    if isfield(matData,'B')
+    if isfield(matData,'B_ED')
             % Eq. 30
-        xBMat = matData.B(new_seq_states,new_seq_inp,iaz); %--
+        xBMat_ED = matData.B_ED(new_seq_states_ED,new_seq_inp_ED,iaz); %--
 
-        B1 = xBMat(1:matData.ndof,:);
-        B2 = xBMat(matData.ndof+1:matData.NumStates,:);
-        MBC.B(new_seq_states,new_seq_inp,iaz) = [T1v*B1; T1v*B2] * T1c; 
+        B1 = xBMat_ED(1:matData.NumEDStates_1, 1 : matData.NumEDInputs);
+        B2 = xBMat_ED(matData.NumEDStates_1+1:matData.NumEDStates, 1 : matData.NumEDInputs);
+        MBC.B(new_seq_states_ED,new_seq_inp_ED,iaz) = [T1v*B1; T1v*B2] * T1c;
+        
+        if matData.NumHDStates > 0
+           xBMat_HD = matData.B_HD(:,:,iaz);
+            B3 = xBMat_HD; %Added by NJ 8/16/18; xAmat for Hydro states
+           MBC.B(matData.NumEDStates + 1:matData.NumStates, matData.NumEDInputs + 1  : (matData.NumEDInputs + matData.NumHDInputs) ,iaz) = [T1qv*B3] * T1qc; % updated for hydro states  
+        end
     end
 
-    if isfield(matData,'C')
+    if isfield(matData,'C_ED')
             % Eq. 31
-        MBC.C(new_seq_out, new_seq_states, iaz) = ...
-                     T1ov * matData.C(new_seq_out,new_seq_states,iaz) * ...
-                     [T1, zeros(matData.ndof); matData.Omega(iaz)*T2, T1];
+
+        MBC.C(new_seq_out, new_seq_states_ED, iaz) = ...
+                     T1ov * matData.C_ED(new_seq_out,new_seq_states_ED,iaz) * ...
+                     [T1, zeros(matData.NumEDStates_1); matData.Omega(iaz)*T2, T1]; 
+        if matData.NumHDStates > 0
+          MBC.C(:, matData.NumEDStates + 1:matData.NumStates, iaz) = ...
+              T1ov * matData.C_HD(:,:,iaz) * T1qc; % updated for hydro states  
+        end
     end
 
-    if isfield(matData,'D')
+    if isfield(matData,'D_ED')
            % Eq. 32
-        MBC.D(new_seq_out,new_seq_inp,iaz) = T1ov * matData.D(new_seq_out,new_seq_inp,iaz) * T1c;
+        MBC.D(new_seq_out,new_seq_inp_ED,iaz) = T1ov * matData.D_ED(new_seq_out,new_seq_inp_ED,iaz) * T1c;
+
+% % %          
+% % %             MBC.D((matData.NumEDOutputs + 1 : matData.NumEDOutputs + matData.NumHDOutputs), : ,iaz) = ...
+% % %               matData.D_HD((matData.NumEDOutputs + 1:matData.NumHDOutputs),:,iaz); % updated for hydro states  
+            MBC.D(:, 7 ,iaz) = ...
+              matData.D_ED(:, 7 ,iaz); % NEED TO FIX!!!!!!!!!!!!!!!!!!!!!!              
+% % %         end
     end
 
-%  end
-
-% mbc transformation of second-order matrices
-%  if ( EqnsOrder == 2 ) %% activate later
-
-    if isfield(matData,'MassMat')
-            % Eq. 19
-        xMassMat = matData.MassMat(new_seq_dof,new_seq_dof,iaz); %--
-        MBC.M(new_seq_dof,new_seq_dof,iaz) = xMassMat*T1; 
-
-        xDampMat = matData.DampMat(new_seq_dof,new_seq_dof,iaz); %--
-        MBC.Dmp(new_seq_dof,new_seq_dof,iaz) = 2*matData.Omega(iaz)*xMassMat*T2 + xDampMat*T1;
-
-        MBC.K(new_seq_dof,new_seq_dof,iaz) =          OmegaSquared*xMassMat*T3 ...
-                                           + matData.OmegaDot(iaz)*xMassMat*T2 ...
-                                           + matData.Omega(   iaz)*xDampMat*T2 ...
-                                           + matData.StffMat(new_seq_dof,new_seq_dof,iaz)*T1;
-    end 
-
-    if isfield(matData,'FMat')
-            % Eq. 19
-        MBC.F(new_seq_dof, new_seq_inp, iaz) = matData.FMat(new_seq_dof,new_seq_inp,iaz)*T1c;
-    end
-
-    if isfield(matData,'DspCMat')
-            % Eq. 19
-        MBC.Vc(new_seq_out,new_seq_dof,iaz) = T1ov * matData.VelCMat(new_seq_out,new_seq_dof,iaz) * T1;
-
-        MBC.Dc(new_seq_out,new_seq_dof,iaz) = T1ov*(matData.Omega(iaz)*matData.VelCMat(new_seq_out,new_seq_dof,iaz)*T2 ...
-                                                                     + matData.DspCMat(new_seq_out,new_seq_dof,iaz)*T1);       
-    end
-
-%  end
+% mbc transformation of second-order matrices <--- comment out for new mbc3
 
 end   % end of azimuth loop
 
@@ -249,7 +287,7 @@ end   % end of azimuth loop
 %------------- Eigensolution and Azimuth Averages -------------------------
 if isfield(MBC,'A')
     MBC.AvgA = mean(MBC.A,3); % azimuth-average of azimuth-dependent MBC.A matrices
-    MBC.eigSol = eiganalysis(MBC.AvgA);
+     MBC.eigSol = eiganalysis(MBC.AvgA,matData.NumEDStates);
 end
 
 if isfield(MBC,'B')
@@ -264,6 +302,7 @@ if isfield(MBC,'D')
     MBC.AvgD = mean(MBC.D,3); % azimuth-average of azimuth-dependent MBC.D matrices
 end
 
+MBC.NumEDStates = matData.NumEDStates;
 % ----------- Clear unneeded variables -------------------------------
   disp('  ');
   disp(' Multi-Blade Coordinate transformation completed ');
@@ -294,14 +333,17 @@ end
 %% ------------------------------------------------------------------------
 % create a sequence where the non-rotating values are first, and are then 
 % followed by the rotating series with b1, b2, b3 triplets:
-function [new_seq] = get_new_seq(rot_triplet,ntot)
+function [new_seq] = get_new_seq(rot_triplet,ntot,NumED)
 %  rot_q_triplet is size n x 3
-
-    non_rotating = true(ntot,1);
-    non_rotating(rot_triplet(:)) = false; % if they are rotating, set them false;
-
-    new_seq = [find(non_rotating); reshape( rot_triplet', numel(rot_triplet), 1)];
-    return
+% if rot_triplet == 0
+%  d=4;
+% else
+      non_rotating = true(ntot,1);
+      non_rotating(rot_triplet(:)) = false; % if they are rotating, set them false;
+      new_seq = [find(non_rotating); reshape( rot_triplet', numel(rot_triplet), 1)];
+      return    
+%end
+    
     
 end
 

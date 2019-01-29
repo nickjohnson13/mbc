@@ -1,4 +1,4 @@
-function [mbc] = eiganalysis(A)
+function [mbc] = eiganalysis(A,NumEDStates)
 % Compute eivals and eivects of A. Re-sequence eivals assumoing that the subset of all complex eivals
 % appear as conjugates. Generate re-sequencing id vector. Compute corresponding damped freqs, natural freqs,
 % decrement rates, damping ratios, eivectors, modal amplitudes, and phases.
@@ -20,7 +20,7 @@ function [mbc] = eiganalysis(A)
 %  NumRigidBodyModes  : 1x1 (equal to ndof - nzs)
 %--------------------
     [m, ns] = size(A);
-    ndof = ns/2;
+    ndof = NumEDStates/2;
     if(m~=ns)
         error('**ERROR: the state-space matrix is not a square matrix');
     end
